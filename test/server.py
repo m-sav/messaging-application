@@ -4,6 +4,9 @@ import sqlite3
 from datetime import datetime
 import signal
 import sys
+import re
+
+MAX_MESSAGE_LENGTH = 500
 
 # Initialize Database
 conn = sqlite3.connect('chat.db', check_same_thread=False)
@@ -29,6 +32,28 @@ cursor.execute("DELETE FROM messages")
 conn.commit()
 
 clients = {}
+
+def validate_send_message(message):
+    # Check if the /send message consists of a minimum of three elements, e.g. "/send maria hi"
+    parts = message.split(' ', 2)
+    if len(parts) < 3:
+        return False
+    to_return = parts[0] == '/send' and len(parts[1]) > 0 and len(parts[2]) > 0
+    return to_return
+
+def is_valid_message_content(content):
+    # Reject messages that are empty or consist only of whitespace.
+    return len(content.strip()) > 0
+
+def is_safe_message(message):
+    # Simple check to disallow potentially harmful characters or commands
+    forbidden_characters = re.compile(r'[^\w\s,.!?]')
+    return not forbidden_characters.search(message)
+
+def is_message_length_valid(message):
+    # Prevent excessively long messages
+    return len(message) <= MAX_MESSAGE_LENGTH
+
 def broadcast(sender, receiver, message):
     if receiver in clients:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -36,14 +61,26 @@ def broadcast(sender, receiver, message):
         clients[receiver].send(formatted_message.encode('utf-8'))
     else:
         print(f"User {receiver} is not online. Message will be stored.")
-
 def handle_client(client_socket, username):
     while True:
         try:
-            message = client_socket.recv(1024).decode('utf-8')
+            message = client_socket.recv(1024).decode('utf-8').strip()
+            
             if message:
-                if message.startswith('/send'):
-                    _, receiver_username, msg_content = message.split(' ', 2)
+
+                if message.startswith('/send') :
+                    
+                    try:
+                        _, receiver_username, msg_content = message.split(' ', 2)
+                    except Exception as e:
+                        print(e)
+                        if not validate_send_message(message) or not is_safe_message(msg_content) or not is_message_length_valid(msg_content) or not is_valid_message_content(msg_content):
+                            client_socket.send(f"Wrong message format. Try again.".encode('utf-8'))
+                    
+                        client_socket.send(f"Enter a new message".encode('utf-8'))
+
+                        continue
+                   
 
                     cursor.execute("SELECT id FROM users WHERE username=?", (username,))
                     sender_id = cursor.fetchone()[0]
@@ -83,7 +120,6 @@ def handle_client(client_socket, username):
             clients.pop(username, None)
             client_socket.close()
             break
-
 
 def client_registration(client_socket):
     client_socket.send("Enter your username: ".encode('utf-8'))
