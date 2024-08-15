@@ -1,0 +1,138 @@
+import socket
+import threading
+import sqlite3
+from datetime import datetime
+import signal
+import sys
+
+# Initialize Database
+conn = sqlite3.connect('chat.db', check_same_thread=False)
+cursor = conn.cursor()
+
+# Create Tables
+cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    username TEXT UNIQUE NOT NULL)''')
+
+cursor.execute('''CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    sender_id INTEGER, 
+                    receiver_id INTEGER, 
+                    content TEXT, 
+                    timestamp TEXT,
+                    FOREIGN KEY (sender_id) REFERENCES users(id), 
+                    FOREIGN KEY (receiver_id) REFERENCES users(id))''')
+
+cursor.execute("DELETE FROM users")
+
+cursor.execute("DELETE FROM messages")
+
+conn.commit()
+
+
+# Handle client connections
+clients = {}
+
+def broadcast(sender, receiver, message):
+    if receiver in clients:
+        clients[receiver].send(f"{sender}: {message}".encode('utf-8'))
+    else:
+        print(f"User {receiver} is not online. Message will be stored.")
+
+def handle_client(client_socket, username):
+    while True:
+        try:
+            message = client_socket.recv(1024).decode('utf-8')
+            if message:
+                if message.startswith('/send'):
+                    _, receiver_username, msg_content = message.split(' ', 2)
+                    
+                    cursor.execute("SELECT id FROM users WHERE username=?", (username,))
+                    sender_id = cursor.fetchone()[0]
+                    cursor.execute("SELECT id FROM users WHERE username=?", (receiver_username,))
+                    receiver = cursor.fetchone()
+
+                    if receiver:
+                        receiver_id = receiver[0]
+                        cursor.execute("INSERT INTO messages (sender_id, receiver_id, content, timestamp) VALUES (?, ?, ?, ?)", 
+                                       (sender_id, receiver_id, msg_content, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                        conn.commit()
+
+                        broadcast(username, receiver_username, msg_content)
+                    else:
+                        client_socket.send(f"User {receiver_username} does not exist.".encode('utf-8'))
+                        # broadcast(username, receiver_username, msg_content)
+
+                
+                elif message.startswith('/history'):
+                    _, receiver_username = message.split(' ', 1)
+                    history = get_chat_history(username, receiver_username)
+                    for msg in history:
+                        client_socket.send(f"{msg}\n".encode('utf-8'))
+            
+            else:
+                raise Exception("Client disconnected")
+        except Exception as e:
+            print(f"Error: {e}")
+            clients.pop(username, None)
+            client_socket.close()
+            break
+
+def client_registration(client_socket):
+    client_socket.send("Enter your username ".encode('utf-8'))
+    username = client_socket.recv(1024).decode('utf-8')
+    
+    try:
+        cursor.execute("INSERT INTO users (username) VALUES (?)", (username,))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        client_socket.send(f"Username {username} is already taken.".encode('utf-8'))
+        client_socket.close()
+        return
+    
+    clients[username] = client_socket
+    client_socket.send(f"Welcome {username}!\nUse /send <username> <message> to send a message.\nUse /history <username> to retrieve chat history.".encode('utf-8'))
+    return username
+
+def get_chat_history(sender_username, receiver_username):
+    cursor.execute("SELECT id FROM users WHERE username=?", (sender_username,))
+    sender_id = cursor.fetchone()[0]
+    cursor.execute("SELECT id FROM users WHERE username=?", (receiver_username,))
+    receiver_id = cursor.fetchone()[0]
+
+    cursor.execute("SELECT sender_id, content, timestamp FROM messages WHERE (sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?) ORDER BY timestamp", 
+                   (sender_id, receiver_id, receiver_id, sender_id))
+    messages = cursor.fetchall()
+
+    history = []
+    for message in messages:
+        sender_id, content, timestamp = message
+        cursor.execute("SELECT username FROM users WHERE id=?", (sender_id,))
+        sender_username = cursor.fetchone()[0]
+        history.append(f"{timestamp} {sender_username}: {content}")
+
+    return history
+
+def shutdown_server(signal, frame):
+    print("Shutting down server...")
+    sys.exit(0)
+
+# Register signal handler for graceful shutdown
+signal.signal(signal.SIGINT, shutdown_server)
+
+# Main Server Code
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind(("localhost", 9999))
+server.listen()
+
+print("Server started and listening for connections...")
+
+while True:
+    client_socket, addr = server.accept()
+    print(f"Accepted connection from {addr}")
+    
+    username = client_registration(client_socket)
+    if username:
+        client_thread = threading.Thread(target=handle_client, args=(client_socket, username))
+        client_thread.start()
+
