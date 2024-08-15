@@ -29,13 +29,13 @@ cursor.execute("DELETE FROM messages")
 conn.commit()
 
 clients = {}
-
 def broadcast(sender, receiver, message):
     if receiver in clients:
-        clients[receiver].send(f"{sender}: {message}".encode('utf-8'))
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        formatted_message = f"[{timestamp}] {sender}: {message}"
+        clients[receiver].send(formatted_message.encode('utf-8'))
     else:
         print(f"User {receiver} is not online. Message will be stored.")
-
 
 def handle_client(client_socket, username):
     while True:
@@ -52,17 +52,16 @@ def handle_client(client_socket, username):
 
                     if receiver:
                         receiver_id = receiver[0]
+                        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         cursor.execute("INSERT INTO messages (sender_id, receiver_id, content, timestamp) VALUES (?, ?, ?, ?)", 
-                                       (sender_id, receiver_id, msg_content, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                                       (sender_id, receiver_id, msg_content, timestamp))
                         conn.commit()
 
                         broadcast(username, receiver_username, msg_content)
-                        client_socket.send(f"Message sent to {receiver_username}.".encode('utf-8'))
+                        client_socket.send(f"[{timestamp}] Message sent to {receiver_username}.".encode('utf-8'))
                     else:
-                        client_socket.send(f"User {receiver_username} does not exist.".encode('utf-8'))
-                        # Continue to prompt for a new message
-                        # Prompt for new command
-                        client_socket.send("Try again or use /send <username> <message>.".encode('utf-8'))
+                        client_socket.send(f"User {receiver_username} does not exist. Try again or use /send <username> <message>.".encode('utf-8'))
+                        continue
 
                 elif message.startswith('/history'):
                     _, receiver_username = message.split(' ', 1)
@@ -75,7 +74,7 @@ def handle_client(client_socket, username):
                         client_socket.send(f"No chat history found with {receiver_username}.".encode('utf-8'))
 
                 # Prompt for new command
-                # client_socket.send("Please enter a new command:".encode('utf-8'))
+                client_socket.send("Enter a new command below.".encode('utf-8'))
 
             else:
                 raise Exception("Client disconnected")
@@ -99,7 +98,7 @@ def client_registration(client_socket):
         return
     
     clients[username] = client_socket
-    client_socket.send(f"Welcome {username}!\nUse /send <username> <message> to send a message.\nUse /history <username> to retrieve chat history.".encode('utf-8'))
+    client_socket.send(f"Welcome {username}!\nUse /send <username> <message> to send a message.\nUse /history to retrieve chat history.".encode('utf-8'))
     return username
 
 def get_chat_history(sender_username, receiver_username):
@@ -117,9 +116,10 @@ def get_chat_history(sender_username, receiver_username):
         sender_id, content, timestamp = message
         cursor.execute("SELECT username FROM users WHERE id=?", (sender_id,))
         sender_username = cursor.fetchone()[0]
-        history.append(f"{timestamp} {sender_username}: {content}")
+        history.append(f"[{timestamp}] {sender_username}: {content}")
 
     return history
+
 
 def shutdown_server(signal, frame):
     print("Shutting down server...")
