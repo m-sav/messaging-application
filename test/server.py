@@ -24,13 +24,10 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS messages (
                     FOREIGN KEY (receiver_id) REFERENCES users(id))''')
 
 cursor.execute("DELETE FROM users")
-
 cursor.execute("DELETE FROM messages")
 
 conn.commit()
 
-
-# Handle client connections
 clients = {}
 
 def broadcast(sender, receiver, message):
@@ -39,6 +36,7 @@ def broadcast(sender, receiver, message):
     else:
         print(f"User {receiver} is not online. Message will be stored.")
 
+
 def handle_client(client_socket, username):
     while True:
         try:
@@ -46,7 +44,7 @@ def handle_client(client_socket, username):
             if message:
                 if message.startswith('/send'):
                     _, receiver_username, msg_content = message.split(' ', 2)
-                    
+
                     cursor.execute("SELECT id FROM users WHERE username=?", (username,))
                     sender_id = cursor.fetchone()[0]
                     cursor.execute("SELECT id FROM users WHERE username=?", (receiver_username,))
@@ -59,17 +57,26 @@ def handle_client(client_socket, username):
                         conn.commit()
 
                         broadcast(username, receiver_username, msg_content)
+                        client_socket.send(f"Message sent to {receiver_username}.".encode('utf-8'))
                     else:
                         client_socket.send(f"User {receiver_username} does not exist.".encode('utf-8'))
-                        # broadcast(username, receiver_username, msg_content)
+                        # Continue to prompt for a new message
+                        # Prompt for new command
+                        client_socket.send("Try again or use /send <username> <message>.".encode('utf-8'))
 
-                
                 elif message.startswith('/history'):
                     _, receiver_username = message.split(' ', 1)
                     history = get_chat_history(username, receiver_username)
-                    for msg in history:
-                        client_socket.send(f"{msg}\n".encode('utf-8'))
-            
+                    if history:
+                        for msg in history:
+                            client_socket.send(f"{msg}\n".encode('utf-8'))
+                        client_socket.send("End of history.".encode('utf-8'))
+                    else:
+                        client_socket.send(f"No chat history found with {receiver_username}.".encode('utf-8'))
+
+                # Prompt for new command
+                # client_socket.send("Please enter a new command:".encode('utf-8'))
+
             else:
                 raise Exception("Client disconnected")
         except Exception as e:
@@ -78,8 +85,9 @@ def handle_client(client_socket, username):
             client_socket.close()
             break
 
+
 def client_registration(client_socket):
-    client_socket.send("Enter your username ".encode('utf-8'))
+    client_socket.send("Enter your username: ".encode('utf-8'))
     username = client_socket.recv(1024).decode('utf-8')
     
     try:
@@ -115,6 +123,11 @@ def get_chat_history(sender_username, receiver_username):
 
 def shutdown_server(signal, frame):
     print("Shutting down server...")
+    cursor.execute("DELETE FROM messages")  # Clear chat history
+    cursor.execute("DELETE FROM users")     # Clear users
+    conn.commit()
+    conn.close()
+    print("Database cleared. Server shutting down.")
     sys.exit(0)
 
 # Register signal handler for graceful shutdown
@@ -135,4 +148,3 @@ while True:
     if username:
         client_thread = threading.Thread(target=handle_client, args=(client_socket, username))
         client_thread.start()
-
