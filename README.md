@@ -16,20 +16,20 @@ Open another terminal and run `client.py` to start a client instance.
     python client.py
 
 ### Register Users
-When you start `client.py`, you will be prompted to enter a username. Register a user with a unique name, e.g., `maria`.
-Open another terminal and start another instance of `client.py` to register a different user, e.g., `bob`.
+When `client.py` starts, you will be prompted to enter a username. Register a user with a unique name. To register additional users, open a new terminal and run another instance of `client.py`.
+
 
 ### Interact with the Application
 
 #### Send Messages
-In Maria's terminal, you can send a message to Bob using the `/send` command. For example:
+To send a message from one user to another, use the `/send` command followed by the recipient's username and the message. For example:
 
-    /send bob hi
+    /send <recipient_username> hi
 
 #### Retrieve Chat History
-To view the chat history between Maria and Bob, use the `/history` command in Maria's terminal and enter Bob's username when prompted:
+To view the chat history with another user, use the `/history` command and provide the desired username when prompted:
 
-    /history bob
+    /history <other_username>
     
 #### Quit Chat Option
 
